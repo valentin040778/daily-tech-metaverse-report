@@ -1,0 +1,68 @@
+name: Daily Tech & Metaverse Report
+
+on:
+  schedule:
+    - cron: "0 7 * * 1-5"   # каждый будний день в 7:00 UTC
+  workflow_dispatch:        # можно запускать вручную из Actions
+
+jobs:
+  send_report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install matplotlib pandas yfinance
+
+      - name: Generate and send report
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python <<EOF
+          import smtplib
+          import yfinance as yf
+          import pandas as pd
+          import matplotlib.pyplot as plt
+          from email.mime.multipart import MIMEMultipart
+          from email.mime.text import MIMEText
+          from email.mime.image import MIMEImage
+          from datetime import datetime, timedelta
+
+          tickers = ['AAPL', 'MSFT', 'META', 'NVDA', 'GOOGL']
+          end = datetime.now()
+          start = end - timedelta(days=7)
+          data = yf.download(tickers, start=start, end=end)['Adj Close']
+
+          plt.figure(figsize=(10,6))
+          for ticker in data.columns:
+              plt.plot(data.index, data[ticker], label=ticker)
+          plt.legend()
+          plt.title('Tech & Metaverse Stocks - Last 7 Days')
+          plt.grid()
+          plt.tight_layout()
+          plt.savefig('report.png')
+
+          msg = MIMEMultipart()
+          msg['From'] = "${{ secrets.EMAIL_USER }}"
+          msg['To'] = "${{ secrets.EMAIL_TO }}"
+          msg['Subject'] = "Tech & Metaverse Daily Report"
+
+          msg.attach(MIMEText("Attached: stock trend chart for the last week.", "plain"))
+          with open('report.png', 'rb') as f:
+              msg.attach(MIMEImage(f.read(), name='report.png'))
+
+          with smtplib.SMTP('smtp.gmail.com', 587) as server:
+              server.starttls()
+              server.login("${{ secrets.EMAIL_USER }}", "${{ secrets.EMAIL_PASS }}")
+              server.send_message(msg)
+          EOF
