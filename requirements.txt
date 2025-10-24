@@ -2,3 +2,4 @@ investpy
 pandas
 matplotlib
 sendgrid
+reportlab
