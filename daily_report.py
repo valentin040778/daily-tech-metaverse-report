@@ -13,7 +13,7 @@ PNG_PATH = "daily_chart.png"
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 TO_EMAIL = "valentin0407@gmail.com"
-FROM_EMAIL = "reports@yourdomain.com"  # можно временно reports@example.com
+FROM_EMAIL = "valentin0407@gmail.com"  # можно временно reports@example.com
 
 # --- определить дату вчерашнего дня ---
 today = datetime.date.today()
