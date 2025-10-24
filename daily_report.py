@@ -2,40 +2,55 @@ import os
 import base64
 import datetime
 import pandas as pd
-import yfinance as yf
 import matplotlib.pyplot as plt
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import investpy
 
-TICKERS = ["AAPL", "MSFT", "NVDA", "META", "RBLX", "U"]  # Unity вместо тикера U
+# --- Конфигурация ---
+TICKERS = {
+    "AAPL": "Apple Inc",
+    "MSFT": "Microsoft Corp",
+    "META": "Meta Platforms Inc",
+    "NVDA": "NVIDIA Corp",
+    "RBLX": "Roblox Corp",
+    "U": "Unity Software Inc"
+}
 CSV_PATH = "data.csv"
-PNG_PATH = "daily_chart.png"
-
+CHART_PATH = "chart.png"
+PDF_PATH = "report.pdf"
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 TO_EMAIL = "valentin0407@gmail.com"
-FROM_EMAIL = "valentin0407@gmail.com"  # можно временно reports@example.com
+FROM_EMAIL = "reports@example.com"
 
-# --- определить дату вчерашнего дня ---
+# --- Определяем даты ---
 today = datetime.date.today()
 yesterday = today - datetime.timedelta(days=1)
 
-# --- загрузить данные через yfinance ---
+# --- Скачиваем данные через investpy ---
 rows = []
-for t in TICKERS:
-    tk = yf.Ticker(t)
-    hist = tk.history(start=yesterday - datetime.timedelta(days=5), end=yesterday + datetime.timedelta(days=1))
-    if hist.empty:
-        continue
-    row = hist.tail(1).iloc[0]
-    close = float(row["Close"])
-    rows.append({"date": yesterday.isoformat(), "ticker": t, "close": close})
+for symbol, name in TICKERS.items():
+    try:
+        data = investpy.get_stock_historical_data(
+            stock=name,
+            country='United States',
+            from_date=(yesterday - datetime.timedelta(days=14)).strftime("%d/%m/%Y"),
+            to_date=yesterday.strftime("%d/%m/%Y")
+        )
+        if not data.empty:
+            close = float(data["Close"].iloc[-1])
+            rows.append({"date": yesterday.isoformat(), "ticker": symbol, "close": close})
+    except Exception as e:
+        print(f"Ошибка для {symbol}: {e}")
 
 if not rows:
-    raise SystemExit("No data fetched — possibly market closed")
+    raise SystemExit("❌ Нет данных (Investing.com ничего не вернул)")
 
 df_new = pd.DataFrame(rows)
 
-# --- накопление данных ---
+# --- Объединяем с историей ---
 if os.path.exists(CSV_PATH):
     df_old = pd.read_csv(CSV_PATH)
     df = pd.concat([df_old, df_new], ignore_index=True)
@@ -45,10 +60,10 @@ else:
 
 df.to_csv(CSV_PATH, index=False)
 
-# --- построение графика ---
+# --- График ---
 pivot = df.pivot(index="date", columns="ticker", values="close").sort_index()
 pivot = pivot.fillna(method="ffill")
-norm = pivot.divide(pivot.iloc[0]).multiply(100)  # базовый индекс 100
+norm = pivot.divide(pivot.iloc[0]).multiply(100)
 
 plt.figure(figsize=(10, 6))
 for col in norm.columns:
@@ -57,13 +72,28 @@ plt.xticks(rotation=45)
 plt.title("Tech & Metaverse Index (base = 100)")
 plt.legend()
 plt.tight_layout()
-plt.savefig(PNG_PATH)
+plt.savefig(CHART_PATH)
 
-# --- отправка email ---
+# --- PDF отчёт ---
+c = canvas.Canvas(PDF_PATH, pagesize=letter)
+c.setFont("Helvetica-Bold", 16)
+c.drawString(50, 750, f"Tech & Metaverse Daily Report — {yesterday.isoformat()}")
+c.setFont("Helvetica", 12)
+c.drawString(50, 730, f"Всего тикеров: {len(TICKERS)}")
+c.drawImage(CHART_PATH, 50, 400, width=500, height=300)
+
+# Последние значения
+y_pos = 370
+for _, r in df_new.iterrows():
+    c.drawString(50, y_pos, f"{r['ticker']}: {r['close']:.2f} USD")
+    y_pos -= 20
+c.save()
+
+# --- Отправка письма ---
 if not SENDGRID_API_KEY:
     raise SystemExit("SENDGRID_API_KEY not set")
 
-with open(PNG_PATH, "rb") as f:
+with open(PDF_PATH, "rb") as f:
     data = f.read()
 encoded = base64.b64encode(data).decode()
 
@@ -71,16 +101,17 @@ message = Mail(
     from_email=FROM_EMAIL,
     to_emails=TO_EMAIL,
     subject=f"Tech & Metaverse Report — {yesterday.isoformat()}",
-    html_content=f"<p>Attached: updated performance chart as of {yesterday.isoformat()}</p>",
+    html_content=f"<p>Attached: PDF report for {yesterday.isoformat()}</p>"
 )
 attachment = Attachment(
     FileContent(encoded),
-    FileName("daily_chart.png"),
-    FileType("image/png"),
-    Disposition("attachment"),
+    FileName("report.pdf"),
+    FileType("application/pdf"),
+    Disposition("attachment")
 )
 message.attachment = attachment
 
 sg = SendGridAPIClient(SENDGRID_API_KEY)
 resp = sg.send(message)
-print("Email sent:", resp.status_code)
+print("✅ Email sent:", resp.status_code)
+
