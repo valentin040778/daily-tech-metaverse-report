@@ -1,4 +1,4 @@
-yfinance
+investpy
 pandas
 matplotlib
 sendgrid
