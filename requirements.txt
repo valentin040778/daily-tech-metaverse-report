@@ -1,5 +1,5 @@
-pandas
+yfinance
 matplotlib
+pandas
 sendgrid
-investpy
 reportlab
